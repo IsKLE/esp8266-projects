@@ -1,0 +1,10 @@
+*.bin
+*.elf
+*.map
+build/
+__pycache__/
+*.pyc
+*.dpapi
+**/obj/
+**/bin/
+
