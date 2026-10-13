@@ -6,7 +6,7 @@
 
 - 为热点客户端提供 IPv4 TCP、UDP 和 ICMP Echo 的 NAT 转发。
 - 过滤主网主动发起的入站连接；已建立 NAT 会话的回复可以返回。
-- OLED 提供网络信息、热点密码和性能三页。正常运行时短按并松开 FLASH 切页；NAT 转发在切页时继续运行。
+- OLED 提供网络信息、热点密码、性能和流量电子宠物四页。开机显示宠物；正常运行时短按并松开 FLASH，依次切换网络 → 密码 → 性能 → 宠物；NAT 转发在切页时继续运行。
 - 性能页显示 CPU 频率、堆内存、热点流量速率、启动以来的峰值和内存碎片率。
 - 配置保存在开发板 Flash。设备重新供电后会自动连接上游并启动热点。
 
@@ -35,6 +35,8 @@ python -B .\tools\nat_control.py provision --seconds 20
 python -B .\tools\nat_control.py status --seconds 10
 python -B .\tools\nat_control.py test --seconds 5
 python -B .\tools\nat_control.py test-ui --seconds 5
+python -B .\tools\nat_control.py test-pet --seconds 5
+python -B .\tools\nat_control.py pet --seconds 2
 python -B .\tools\nat_control.py show-password
 ```
 
@@ -47,6 +49,13 @@ python -B .\tools\nat_control.py show-password
 1. **网络信息**：上游 Wi-Fi、WAN/AP 地址、客户端数量、RSSI、NAT 状态、拦截包数和运行时间。
 2. **热点密码**：热点名称和密码。密码只显示在 OLED 页面中。
 3. **性能**：CPU 频率、剩余堆内存、当前和峰值上行/下行速率、内存碎片率。
+4. **电子宠物**：像素猫动画、上下行速率和连接热点的设备数量（`Friends`）。右上实心圆表示 NAT 已启用，空心圆表示尚未启用。
+
+宠物根据热点上下行速率之和活动：低于 1 KiB/s 时打盹（`SLEEP`），达到 1 KiB/s 时走动（`WALK`），达到 32 KiB/s 时奔跑（`RUN`）；上游断开或 NAT 暂未就绪时显示疑惑表情（`OFFLINE`），缺少配置时为 `SETUP`。短暂流量会保持走动 2.5 秒、奔跑 1.5 秒，避免频繁抖动。上述阈值是动画规则，不代表网络的最大带宽。
+
+动画使用现有 OLED 缓冲区直接绘图，休息时每秒刷新 2 次，活动时最多 4 次；仅宠物页使用此刷新频率。不申请额外图片缓冲区，也不写入 Flash。CPU 维持 160 MHz。板载指示灯的 GPIO 和有效电平尚未确认，宠物状态先通过屏幕显示。
+
+`test-pet` 在开发板上检查流量阈值、短流量保持、断线重连、计时器回绕和速率相加溢出。`pet` 通过 USB 切到宠物页；`pet-frame` 切到宠物页并导出 1024 字节 SSD1306 缓冲区（`PET1` 十六进制记录），可用于渲染核对，不导出密码页。串口状态新增 `pageCount`、`oled`、`petState` 和 `petFrame`。
 
 `UP` 是热点收到客户端数据的速率，`DN` 是热点成功提交发送的数据速率。计数包括热点侧 Ethernet 帧及协议头，不保存或输出报文内容；不包括无线 MAC 开销、重传和空口占用。峰值只统计本次启动以来的采样值，不代表链路理论带宽。
 

@@ -147,7 +147,7 @@ def read_board(command, seconds, port='COM3'):
             if not raw: continue
             text = raw.decode('utf-8',errors='replace').strip()
             # Strict allowlist: never echo commands or unknown firmware data.
-            if text.startswith(('NAT1 ', 'TEST1 ', 'TESTUI ', 'OK ', 'ERR ')):
+            if text.startswith(('NAT1 ', 'TEST1 ', 'TESTUI ', 'TESTPET ', 'PET1 ', 'OK ', 'ERR ')):
                 print(text,flush=True)
                 records.append(text)
     finally: connection.close()
@@ -155,19 +155,19 @@ def read_board(command, seconds, port='COM3'):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('action',choices=['provision','status','test','test-ui','reboot','radio-on','radio-off','connect-ap','connect-upstream','cleanup','show-password'])
+    parser.add_argument('action',choices=['provision','status','test','test-ui','test-pet','pet','pet-frame','reboot','radio-on','radio-off','connect-ap','connect-upstream','cleanup','show-password'])
     parser.add_argument('--seconds',type=int,default=15)
     parser.add_argument('--port',default='COM3')
     parser.add_argument('--log')
     args = parser.parse_args()
-    if args.action in ['provision','status','test','test-ui','reboot']:
-        command = {'status':b'STATUS','test':b'TEST','test-ui':b'TESTUI','reboot':b'REBOOT'}.get(args.action)
+    if args.action in ['provision','status','test','test-ui','test-pet','pet','pet-frame','reboot']:
+        command = {'status':b'STATUS','test':b'TEST','test-ui':b'TESTUI','test-pet':b'TESTPET','pet':b'PET','pet-frame':b'PETFRAME','reboot':b'REBOOT'}.get(args.action)
         if args.action == 'provision': command = b'CONFIG ' + config_packet(save_config()).hex().encode('ascii')
         records = read_board(command,args.seconds,args.port)
         if args.log:
             path=Path(args.log);path.parent.mkdir(parents=True,exist_ok=True);path.write_text('\n'.join(records)+'\n',encoding='utf-8')
         if args.action == 'provision' and 'OK CONFIG SAVED' not in records: raise RuntimeError('Board did not confirm configuration')
-        if args.action in ['test','test-ui'] and not any('"ok":true' in s for s in records): raise RuntimeError('Board self test failed')
+        if args.action in ['test','test-ui','test-pet'] and not any('"ok":true' in s for s in records): raise RuntimeError('Board self test failed')
     elif args.action == 'show-password':
         cfg=load_config()
         # Native dialog only: password does not enter tool output or a text file.

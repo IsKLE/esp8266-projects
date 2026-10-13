@@ -10,6 +10,8 @@
 #include "Firewall.h"
 #include "FlashButton.h"
 #include "TrafficMeter.h"
+#include "TrafficPet.h"
+#include "PetDrawing.h"
 #if !LWIP_FEATURES || LWIP_IPV6
 #error This sketch requires IPv4 lwIP with NAPT (lm2f).
 #endif
@@ -32,7 +34,9 @@ IPAddress lastWan;
 constexpr uint8_t FLASH_BUTTON_GPIO = 0;
 FlashButton flashButton;
 TrafficMeter traffic;
-uint8_t displayPage = 0;
+TrafficPet pet;
+constexpr uint8_t DISPLAY_PAGE_COUNT = 4;
+uint8_t displayPage = 3; // Start with the pet; FLASH still cycles all pages.
 uint32_t buttonEvents = 0;
 volatile uint32_t apReceivedBytes = 0, apSentBytes = 0;
 
@@ -93,13 +97,30 @@ extern "C" err_t __wrap_ethernet_input_LWIP2(struct pbuf* p, struct netif* netif
 void reportStatus() {
   uint32_t freeHeap, maxBlock; uint8_t fragmentation;
   ESP.getHeapStats(&freeHeap, &maxBlock, &fragmentation);
-  Serial.printf("NAT1 {\"connected\":%s,\"nat\":%s,\"firewall\":true,\"wan\":\"%s\",\"ap\":\"%s\",\"dns\":\"%s\",\"rssi\":%d,\"channel\":%d,\"clients\":%d,\"heap\":%u,\"upstreamPackets\":%u,\"childPackets\":%u,\"blocked\":%u,\"wifiStatus\":%d,\"uptime\":%lu,\"page\":%u,\"buttonEvents\":%u,\"flashPressed\":%s,\"cpuMHz\":%u,\"heapMaxBlock\":%u,\"heapFragmentation\":%u,\"upBps\":%u,\"downBps\":%u,\"peakUpBps\":%u,\"peakDownBps\":%u,\"apRxBytes\":%u,\"apTxBytes\":%u}\n",
+  Serial.printf("NAT1 {\"connected\":%s,\"nat\":%s,\"firewall\":true,\"wan\":\"%s\",\"ap\":\"%s\",\"dns\":\"%s\",\"rssi\":%d,\"channel\":%d,\"clients\":%d,\"heap\":%u,\"upstreamPackets\":%u,\"childPackets\":%u,\"blocked\":%u,\"wifiStatus\":%d,\"uptime\":%lu,\"page\":%u,\"buttonEvents\":%u,\"flashPressed\":%s,\"cpuMHz\":%u,\"heapMaxBlock\":%u,\"heapFragmentation\":%u,\"upBps\":%u,\"downBps\":%u,\"peakUpBps\":%u,\"peakDownBps\":%u,\"apRxBytes\":%u,\"apTxBytes\":%u,\"pageCount\":%u,\"oled\":%s,\"petState\":\"%s\",\"petFrame\":%u}\n",
     WiFi.status() == WL_CONNECTED ? "true":"false", natEnabled ? "true":"false",
     WiFi.localIP().toString().c_str(), apIP.toString().c_str(), WiFi.dnsIP(0).toString().c_str(),
     WiFi.RSSI(), WiFi.channel(), WiFi.softAPgetStationNum(), ESP.getFreeHeap(),
     upstreamPackets, childPackets, blockedPackets, WiFi.status(), millis()/1000,
     displayPage, buttonEvents, digitalRead(FLASH_BUTTON_GPIO)==LOW?"true":"false", ESP.getCpuFreqMHz(),
-    maxBlock, fragmentation, traffic.upBps, traffic.downBps, traffic.peakUpBps, traffic.peakDownBps, apReceivedBytes, apSentBytes);
+    maxBlock, fragmentation, traffic.upBps, traffic.downBps, traffic.peakUpBps, traffic.peakDownBps, apReceivedBytes, apSentBytes,
+    DISPLAY_PAGE_COUNT,screen?"true":"false",pet.name(),pet.frame(millis()));
+}
+void drawPetRate(char direction, uint32_t rate) {
+  if (rate >= 1000000) oled.printf("%c %u.%uM/s",direction,rate/1000000,(rate%1000000)/100000);
+  else oled.printf("%c %u.%uK/s",direction,rate/1000,(rate%1000)/100);
+}
+void drawPet() {
+  oled.setTextWrap(false);
+  oled.println(F("PET 4/4"));
+  if (natEnabled) oled.fillCircle(59,3,2,SSD1306_WHITE);
+  else oled.drawCircle(59,3,2,SSD1306_WHITE);
+  oled.drawFastHLine(0,11,64,SSD1306_WHITE);
+  drawTrafficCat(oled,pet.state,pet.frame(millis()));
+  oled.setCursor((64-strlen(pet.name())*6)/2,93); oled.print(pet.name());
+  oled.setCursor(0,104); drawPetRate('U',traffic.upBps);
+  oled.setCursor(0,112); drawPetRate('D',traffic.downBps);
+  oled.setCursor(0,120); oled.printf("Friends %u",WiFi.softAPgetStationNum());
 }
 void drawRate(const char* label, uint32_t bytesPerSecond) {
   oled.println(label);
@@ -123,10 +144,11 @@ void drawStatus() {
   if (!screen) return;
   oled.clearDisplay(); oled.setTextSize(1); oled.setTextColor(SSD1306_WHITE); oled.setCursor(0,0);
   oled.setTextWrap(true);
+  if (displayPage == 3) { drawPet(); oled.display(); return; }
   if (displayPage == 2) {
     uint32_t freeHeap, maxBlock; uint8_t fragmentation;
     ESP.getHeapStats(&freeHeap, &maxBlock, &fragmentation);
-    oled.println(F("PERF 3/3"));
+    oled.println(F("PERF 3/4"));
     oled.printf("CPU %uMHz\n", ESP.getCpuFreqMHz());
     oled.printf("Free %uK\n",freeHeap/1024);
     oled.printf("Frag %u%%\n",fragmentation);
@@ -137,7 +159,7 @@ void drawStatus() {
     oled.display(); return;
   }
   if (displayPage == 1) {
-    oled.println(F("WIFI 2/3"));
+    oled.println(F("WIFI 2/4"));
     if (configured) {
       oled.setCursor(0,16); oled.println(F("SSID"));
       drawWrappedValue(config.ap,10,1);
@@ -150,7 +172,7 @@ void drawStatus() {
     } else {oled.println(F("USB SETUP"));oled.println(F("REQUIRED"));}
     oled.display(); return;
   }
-  oled.println(F("NET 1/3"));
+  oled.println(F("NET 1/4"));
   if (!configured) {oled.println(F("USB SETUP"));oled.println(F("REQUIRED"));oled.display();return;}
   oled.printf("%.20s\n", config.ssid);
   oled.println(F("WAN IP"));
@@ -186,6 +208,26 @@ void handleCommand() {
   command[commandLength]=0;
   if (!strcmp(command,"STATUS")) reportStatus();
   else if (!strcmp(command,"TEST")) selfTest();
+  else if (!strcmp(command,"TESTPET")) {
+    const auto result = testTrafficPet();
+    Serial.printf("TESTPET {\"passed\":%u,\"total\":%u,\"ok\":%s}\n",
+      result.passed,result.total,result.passed==result.total?"true":"false");
+  }
+  else if (!strcmp(command,"PET") || !strcmp(command,"PETFRAME")) {
+    displayPage = 3; drawStatus(); lastScreen=millis();
+    // Only export the pet framebuffer; password pages are never exported.
+    if (!strcmp(command,"PETFRAME") && screen) {
+      Serial.print(F("PET1 "));
+      const uint8_t* pixels = oled.getBuffer();
+      for (size_t n=0;n<128*64/8;++n) {
+        static const char hex[] = "0123456789abcdef";
+        Serial.write(hex[pixels[n]>>4]); Serial.write(hex[pixels[n]&15]);
+        if ((n&63)==63) yield();
+      }
+      Serial.println();
+    }
+    reportStatus();
+  }
   else if (!strcmp(command,"TESTUI")) {
     const auto button = testFlashButton(); const auto meter = testTrafficMeter();
     Serial.printf("TESTUI {\"buttonPassed\":%u,\"buttonTotal\":%u,\"trafficPassed\":%u,\"trafficTotal\":%u,\"ok\":%s}\n",
@@ -228,8 +270,8 @@ void setup() {
 }
 void loop() {
   if(flashButton.sample(digitalRead(FLASH_BUTTON_GPIO)==LOW,millis())) {
-    displayPage = (displayPage+1)%3; ++buttonEvents;
-    drawStatus(); reportStatus();
+    displayPage = (displayPage+1)%DISPLAY_PAGE_COUNT; ++buttonEvents;
+    drawStatus(); lastScreen=millis(); reportStatus();
   }
   traffic.sample(millis(),apReceivedBytes,apSentBytes);
   while(Serial.available()) {
@@ -252,7 +294,13 @@ void loop() {
     }
     lastWan=WiFi.localIP();
   } else if(!connected && natEnabled) {ip_napt_enable_no(SOFTAP_IF,0);natEnabled=false;}
-  if(millis()-lastScreen>=1000) { lastScreen=millis(); drawStatus(); }
+  const auto previousPetState = pet.state;
+  pet.sample(millis(),configured,natEnabled,traffic.upBps,traffic.downBps);
+  const uint32_t refresh = displayPage==3 ?
+    (pet.state==TrafficPet::Walk || pet.state==TrafficPet::Run ? 250 : 500) : 1000;
+  if(millis()-lastScreen>=refresh || (displayPage==3 && pet.state!=previousPetState)) {
+    lastScreen=millis(); drawStatus();
+  }
   if(millis()-lastStatus>=5000) { lastStatus=millis(); reportStatus(); }
   delay(1);
 }
